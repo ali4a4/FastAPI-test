@@ -2,7 +2,9 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Query
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 from contextlib import asynccontextmanager
-import datetime
+from datetime import datetime
+from pydantic import BaseModel
+from sqlalchemy import desc
 
 class Unit(SQLModel, table=True):
     __tablename__ = "units"
@@ -27,8 +29,14 @@ class Measure(SQLModel, table=True):
     reading_id: int = Field(primary_key=True)
     sensor_id: int = Field(foreign_key="sensors.sensor_id")
     metric_id: int = Field(foreign_key="metrics.metric_id")
-    rtime: str = Field(index=True)
+    rtime: datetime = Field(index=True)
     rvalue: float = Field(index=True)
+
+class SensorWithMeasure(BaseModel):
+    sensor_id: int
+    serial_code: str
+    name: str
+    latest_measure: Measure | None
 
 sqlite_file_name = "aranet.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
@@ -58,3 +66,12 @@ async def root(session: SessionDep, offset: int = 0, limit: Annotated[int, Query
     sensors = session.exec(select(Sensor).offset(offset).limit(limit)).all()
     units = session.exec(select(Unit).offset(offset).limit(limit)).all()
     return {"measures": measures, "metrics": metrics, "sensors": sensors, "units": units}
+
+@app.get("/sensorList")
+async def sensorList(session: SessionDep):
+    sensors = session.exec(select(Sensor)).all()
+    result = []
+    for sensor in sensors:
+        measure = session.exec(select(Measure).where(Measure.sensor_id == sensor.sensor_id).order_by(Measure.rtime.desc())).first()
+        result.append(SensorWithMeasure(sensor_id = sensor.sensor_id, serial_code = sensor.serial_code, name = sensor.name, latest_measure = measure))
+    return result
