@@ -1,10 +1,27 @@
 from typing import Annotated
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, Query, HTTPException, status
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 from contextlib import asynccontextmanager
 from datetime import datetime, date
 from pydantic import BaseModel
-from sqlalchemy import desc
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+
+# two users available to be authenticated as
+fake_users_db = {
+    "john_user": {
+        "username": "john_user",
+        "role": "user",
+        "password": "password",
+    },
+    "alvin_admin": {
+        "username": "alvin_admin",
+        "role": "admin",
+        "password": "password123",
+    },
+}
+
+
+# classes that are used to work with database tables
 
 class Unit(SQLModel, table=True):
     __tablename__ = "units"
@@ -32,11 +49,16 @@ class Measure(SQLModel, table=True):
     rtime: datetime = Field(index=True)
     rvalue: float = Field(index=True)
 
+
+# for sensorList
 class SensorWithMeasure(BaseModel):
     sensor_id: int
     serial_code: str
     name: str
     latest_measure: Measure | None
+
+
+# for sensorMinMax
 
 class MetricMinMax(BaseModel):
     metric: str
@@ -47,6 +69,17 @@ class SensorMinMax(BaseModel):
     sensor: Sensor
     date: date
     metrics: list[MetricMinMax]
+
+
+# for authentication
+
+class User(BaseModel):
+    username: str
+    role: str
+
+class UserInDB(User):
+    password: str
+
 
 sqlite_file_name = "aranet.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
@@ -69,6 +102,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# checks if user is authenticated
+def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
+    if token not in fake_users_db:
+        raise HTTPException(status_code = status.HTTP_401_UNAUTHORIZED, detail = "Not authenticated", headers = {"WWW-Authenticate": "Bearer"})
+    user_dict = fake_users_db[token]
+    return UserInDB(**user_dict)
+
+# checks if user is also admin
+def get_current_admin(current_user: Annotated[User, Depends(get_current_user)]):
+    if current_user.role != "admin":
+        raise HTTPException(status_code = status.HTTP_403_FORBIDDEN, detail = "Not enough permissions")
+    return current_user
+
+# test function
+"""
 @app.get("/")
 async def root(session: SessionDep, offset: int = 0, limit: Annotated[int, Query(le=3)] = 3) -> dict[str, Any]:
     measures = session.exec(select(Measure).offset(offset).limit(limit)).all()
@@ -76,8 +126,9 @@ async def root(session: SessionDep, offset: int = 0, limit: Annotated[int, Query
     sensors = session.exec(select(Sensor).offset(offset).limit(limit)).all()
     units = session.exec(select(Unit).offset(offset).limit(limit)).all()
     return {"measures": measures, "metrics": metrics, "sensors": sensors, "units": units}
+"""
 
-# remove sensor_id from inside of latest_measure
+# returns a list of all sensors with the latest measurement for each sensor
 @app.get("/sensorList")
 async def sensorList(session: SessionDep):
     sensors = session.exec(select(Sensor)).all()
@@ -91,9 +142,9 @@ async def sensorList(session: SessionDep):
         result.append(SensorWithMeasure(sensor_id = s.sensor_id, serial_code = s.serial_code, name = s.name, latest_measure = measure))
     return result
 
-# apply precision from units table
+# returns the minimum and maximum value of each metric for each sensor on the date specified in the request parameter
 @app.get("/sensorMinMax")
-async def sensorMinMax(session: SessionDep, target_date: date = date.today()):
+async def sensorMinMax(session: SessionDep, current_user: Annotated[User, Depends(get_current_user)], target_date: date = date.today()):
     sensors = session.exec(select(Sensor)).all()
     result = []
     for s in sensors:
@@ -119,10 +170,9 @@ async def sensorMinMax(session: SessionDep, target_date: date = date.today()):
         result.append(SensorMinMax(sensor = s, date = target_date, metrics = metrics_min_max))
     return result
 
-# add ability to select several sensors and metrics
-# if time_to is a date, measures up to previous day 23:59:59 are returned, maybe change that to add the time_to date
+# returns a list of measures with the ability to filter by sensor, metric, time interval and value interval
 @app.get("/measureFilter")
-async def measureFilter(session: SessionDep, target_sensor_id: int | None = None, target_metric_id: int | None = None, time_from: datetime | None = None, time_to: datetime | None = None, value_from: float | None = None, value_to: float | None = None):
+async def measureFilter(session: SessionDep, current_user: Annotated[User, Depends(get_current_admin)], target_sensor_id: int | None = None, target_metric_id: int | None = None, time_from: datetime | None = None, time_to: datetime | None = None, value_from: float | None = None, value_to: float | None = None):
     query = select(Measure)
     if target_sensor_id is not None:
         query = query.where(Measure.sensor_id == target_sensor_id)
@@ -138,3 +188,14 @@ async def measureFilter(session: SessionDep, target_sensor_id: int | None = None
         query = query.where(Measure.rvalue <= value_to)
     measures = session.exec(query).all()
     return measures
+
+# used for authorization
+@app.post("/token")
+async def token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+    user_dict = fake_users_db.get(form_data.username)
+    if not user_dict:
+        raise HTTPException(status_code = 400, detail = "Incorrect username or password")
+    user = UserInDB(**user_dict)
+    if not form_data.password == user.password:
+        raise HTTPException(status_code = 400, detail = "Incorrect username or password")
+    return {"access_token": user.username, "token_type": "bearer"}
