@@ -93,28 +93,48 @@ async def sensorList(session: SessionDep):
 
 # apply precision from units table
 @app.get("/sensorMinMax")
-async def sensorMinMax(session: SessionDep, date_: date = date.today):
+async def sensorMinMax(session: SessionDep, target_date: date = date.today()):
     sensors = session.exec(select(Sensor)).all()
     result = []
     for s in sensors:
         metrics = session.exec(select(Metric)).all()
         metrics_min_max = []
         for m in metrics:
-            min_value_ = session.exec(
+            query_min_value = session.exec(
                     select(Measure.rvalue).
                     where(Measure.sensor_id == s.sensor_id).
                     where(Measure.metric_id == m.metric_id).
-                    where(Measure.rtime.like(f"{date_}%")).
+                    where(Measure.rtime.like(f"{target_date}%")).
                     order_by(Measure.rvalue)
                 ).first()
-            if min_value_:
-                max_value_ = session.exec(
+            if query_min_value:
+                query_max_value = session.exec(
                     select(Measure.rvalue).
                     where(Measure.sensor_id == s.sensor_id).
                     where(Measure.metric_id == m.metric_id).
-                    where(Measure.rtime.like(f"{date_}%")).
+                    where(Measure.rtime.like(f"{target_date}%")).
                     order_by(Measure.rvalue.desc())
                 ).first()
-                metrics_min_max.append(MetricMinMax(metric = m.metric_name, min_value = min_value_, max_value = max_value_))
-        result.append(SensorMinMax(sensor = s, date = date_, metrics = metrics_min_max))
+                metrics_min_max.append(MetricMinMax(metric = m.metric_name, min_value = query_min_value, max_value = query_max_value))
+        result.append(SensorMinMax(sensor = s, date = target_date, metrics = metrics_min_max))
     return result
+
+# add ability to select several sensors and metrics
+# if time_to is a date, measures up to previous day 23:59:59 are returned, maybe change that to add the time_to date
+@app.get("/measureFilter")
+async def measureFilter(session: SessionDep, target_sensor_id: int | None = None, target_metric_id: int | None = None, time_from: datetime | None = None, time_to: datetime | None = None, value_from: float | None = None, value_to: float | None = None):
+    query = select(Measure)
+    if target_sensor_id is not None:
+        query = query.where(Measure.sensor_id == target_sensor_id)
+    if target_metric_id is not None:
+        query = query.where(Measure.metric_id == target_metric_id)
+    if time_from is not None:
+        query = query.where(Measure.rtime >= time_from)
+    if time_to is not None:
+        query = query.where(Measure.rtime <= time_to)
+    if value_from is not None:
+        query = query.where(Measure.rvalue >= value_from)
+    if value_to is not None:
+        query = query.where(Measure.rvalue <= value_to)
+    measures = session.exec(query).all()
+    return measures
