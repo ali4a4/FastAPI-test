@@ -1,0 +1,5 @@
+fastapi
+sqlmodel
+pydantic
+uvicorn
+python-multipart

@@ -189,7 +189,7 @@ async def measureFilter(session: SessionDep, current_user: Annotated[User, Depen
     measures = session.exec(query).all()
     return measures
 
-# used for authorization
+# used for authentication
 @app.post("/token")
 async def token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
     user_dict = fake_users_db.get(form_data.username)
