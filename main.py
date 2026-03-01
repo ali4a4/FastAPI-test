@@ -51,11 +51,18 @@ class Measure(SQLModel, table=True):
 
 
 # for sensorList
+
+class MeasureWithoutSensorId(BaseModel):
+    reading_id: int
+    metric_id: int
+    rtime: datetime
+    rvalue: float
+
 class SensorWithMeasure(BaseModel):
     sensor_id: int
     serial_code: str
     name: str
-    latest_measure: Measure | None
+    latest_measure: MeasureWithoutSensorId | None
 
 
 # for sensorMinMax
@@ -139,7 +146,10 @@ async def sensorList(session: SessionDep):
             where(Measure.sensor_id == s.sensor_id).
             order_by(Measure.rtime.desc())
         ).first()
-        result.append(SensorWithMeasure(sensor_id = s.sensor_id, serial_code = s.serial_code, name = s.name, latest_measure = measure))
+        measure_without_sensor_id = None
+        if measure:
+            measure_without_sensor_id = MeasureWithoutSensorId(reading_id = measure.reading_id, metric_id = measure.metric_id, rtime = measure.rtime, rvalue = measure.rvalue)
+        result.append(SensorWithMeasure(sensor_id = s.sensor_id, serial_code = s.serial_code, name = s.name, latest_measure = measure_without_sensor_id))
     return result
 
 # returns the minimum and maximum value of each metric for each sensor on the date specified in the request parameter

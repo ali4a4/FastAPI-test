@@ -1,5 +1,2 @@
-fastapi
+fastapi[standard]
 sqlmodel
-pydantic
-uvicorn
-python-multipart
