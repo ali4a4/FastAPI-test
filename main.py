@@ -148,7 +148,13 @@ async def sensorList(session: SessionDep):
         ).first()
         measure_without_sensor_id = None
         if measure:
-            measure_without_sensor_id = MeasureWithoutSensorId(reading_id = measure.reading_id, metric_id = measure.metric_id, rtime = measure.rtime, rvalue = measure.rvalue)
+            precision = session.exec(
+                select(Unit.precision)
+                .join(Metric, Metric.unit_id == Unit.unit_id)
+                .join(Measure, Measure.metric_id == Metric.metric_id)
+                .where(Measure.reading_id == measure.reading_id)
+            ).first()
+            measure_without_sensor_id = MeasureWithoutSensorId(reading_id = measure.reading_id, metric_id = measure.metric_id, rtime = measure.rtime, rvalue = round(measure.rvalue, precision))
         result.append(SensorWithMeasure(sensor_id = s.sensor_id, serial_code = s.serial_code, name = s.name, latest_measure = measure_without_sensor_id))
     return result
 
@@ -176,7 +182,11 @@ async def sensorMinMax(session: SessionDep, current_user: Annotated[User, Depend
                     where(Measure.rtime.like(f"{target_date}%")).
                     order_by(Measure.rvalue.desc())
                 ).first()
-                metrics_min_max.append(MetricMinMax(metric = m.metric_name, min_value = query_min_value, max_value = query_max_value))
+                precision = session.exec(
+                    select(Unit.precision)
+                    .where(Unit.unit_id == m.unit_id)
+                ).first()
+                metrics_min_max.append(MetricMinMax(metric = m.metric_name, min_value = round(query_min_value, precision), max_value = round(query_max_value, precision)))
         result.append(SensorMinMax(sensor = s, date = target_date, metrics = metrics_min_max))
     return result
 
@@ -197,6 +207,14 @@ async def measureFilter(session: SessionDep, current_user: Annotated[User, Depen
     if value_to is not None:
         query = query.where(Measure.rvalue <= value_to)
     measures = session.exec(query).all()
+    for m in measures:
+        precision = session.exec(
+            select(Unit.precision)
+            .join(Metric, Metric.unit_id == Unit.unit_id)
+            .join(Measure, Measure.metric_id == Metric.metric_id)
+            .where(Measure.reading_id == m.reading_id)
+        ).first()
+        m.rvalue = round(m.rvalue, precision)
     return measures
 
 # used for authentication
