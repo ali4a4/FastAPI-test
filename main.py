@@ -192,12 +192,12 @@ async def sensorMinMax(session: SessionDep, current_user: Annotated[User, Depend
 
 # returns a list of measures with the ability to filter by sensor, metric, time interval and value interval
 @app.get("/measureFilter")
-async def measureFilter(session: SessionDep, current_user: Annotated[User, Depends(get_current_admin)], target_sensor_id: int | None = None, target_metric_id: int | None = None, time_from: datetime | None = None, time_to: datetime | None = None, value_from: float | None = None, value_to: float | None = None):
+async def measureFilter(session: SessionDep, current_user: Annotated[User, Depends(get_current_admin)], target_sensor_id_list: list[int] | None = Query(default = None), target_metric_id_list: list[int] | None = Query(default = None), time_from: datetime | None = None, time_to: datetime | None = None, value_from: float | None = None, value_to: float | None = None):
     query = select(Measure)
-    if target_sensor_id is not None:
-        query = query.where(Measure.sensor_id == target_sensor_id)
-    if target_metric_id is not None:
-        query = query.where(Measure.metric_id == target_metric_id)
+    if target_sensor_id_list is not None:
+        query = query.where(Measure.sensor_id.in_(target_sensor_id_list))
+    if target_metric_id_list is not None:
+        query = query.where(Measure.metric_id.in_(target_metric_id_list))
     if time_from is not None:
         query = query.where(Measure.rtime >= time_from)
     if time_to is not None:
